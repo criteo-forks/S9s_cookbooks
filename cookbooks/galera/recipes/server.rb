@@ -17,6 +17,9 @@
 # limitations under the License.
 #
 
+package "libaio"
+package "rsync"
+
 if node[:galera_config]["vagrant_host"] then
   # Vagrant host only fix
   Ohai::Config[:plugin_path] << node['vagrant-ohai']['plugin_path']
