@@ -17,35 +17,37 @@
 # limitations under the License.
 #
 
-# Vagrant host only fix
-Ohai::Config[:plugin_path] << node['vagrant-ohai']['plugin_path']
-Chef::Log.info("vagrant ohai plugins will be at: #{node['vagrant-ohai']['plugin_path']}")
+if node[:galera_config]["vagrant_host"] then
+  # Vagrant host only fix
+  Ohai::Config[:plugin_path] << node['vagrant-ohai']['plugin_path']
+  Chef::Log.info("vagrant ohai plugins will be at: #{node['vagrant-ohai']['plugin_path']}")
 
-rd = remote_directory node['vagrant-ohai']['plugin_path'] do
-  source 'plugins'
-  owner 'root'
-  group 'root'
-  mode 0755
-  recursive true
-  action :nothing
-end
-
-rd.run_action(:create)
-
-# only reload ohai if new plugins were dropped off OR
-# node['vagrant-ohai']['plugin_path'] does not exists in client.rb
-if rd.updated? || 
-  !(::IO.read(Chef::Config[:config_file]) =~ /Ohai::Config\[:plugin_path\]\s*<<\s*["']#{node['vagrant-ohai']['plugin_path']}["']/)
-
-  ohai 'custom_plugins' do
+  rd = remote_directory node['vagrant-ohai']['plugin_path'] do
+    source 'plugins'
+    owner 'root'
+    group 'root'
+    mode 0755
+    recursive true
     action :nothing
-  end.run_action(:reload)
+  end
 
+  rd.run_action(:create)
+
+  # only reload ohai if new plugins were dropped off OR
+  # node['vagrant-ohai']['plugin_path'] does not exists in client.rb
+  if rd.updated? ||
+     !(::IO.read(Chef::Config[:config_file]) =~ /Ohai::Config\[:plugin_path\]\s*<<\s*["']#{node['vagrant-ohai']['plugin_path']}["']/)
+
+    ohai 'custom_plugins' do
+      action :nothing
+    end.run_action(:reload)
+
+  end
+
+  # Vagrant host only fix end
 end
 
-# Vagrant host only fix end
-
-install_flag = "/root/.s9s_galera_installed"
+install_flag = ::File.join(Chef::Config[:file_cache_path], ".s9s_galera_installed")
 
 group "mysql" do
 end
@@ -57,7 +59,7 @@ user "mysql" do
   shell "/bin/false"
 end
 
-galera_config = data_bag_item('s9s_galera', 'config')
+galera_config = node[:galera_config]
 mysql_tarball = galera_config['mysql_wsrep_tarball_' + node['kernel']['machine']]
 # strip .tar.gz
 mysql_package = mysql_tarball[0..-8]
@@ -184,11 +186,24 @@ template "my.cnf" do
 end
 
 my_ip = node['ipaddress']
-init_host = galera_config['init_node']
+
+if node[:galera_config]["hostnames"] then
+  init_host = Resolv.getaddresses(galera_config['init_node']).last
+else
+  init_host = galera_config['init_node']  
+end
+
 sync_host = init_host
 
-hosts = galera_config['galera_nodes']
-Chef::Log.info "init_host = #{init_host}, my_ip = #{my_ip}, hosts = #{hosts}"
+hosts = []
+if node[:galera_config]["hostnames"] then
+  galera_config['galera_nodes'].each do |fqdn|
+    hosts << Resolv.getaddresses(fqdn).last
+  end
+else
+  hosts = galera_config['galera_nodes']
+end
+
 if File.exists?("#{install_flag}") && hosts != nil && hosts.length > 0
   i = 0
   begin
@@ -269,7 +284,7 @@ bash "secure-mysql" do
   user "root"
   code <<-EOH
     #{node['mysql']['mysql_bin']} -uroot -h127.0.0.1 -e "DROP DATABASE IF EXISTS test; DELETE FROM mysql.db WHERE DB='test' OR DB='test\\_%'"
-    #{node['mysql']['mysql_bin']} -uroot -h127.0.0.1 -e "UPDATE mysql.user SET Password=PASSWORD('#{node['mysql']['root_password']}') WHERE User='root'; DELETE FROM mysql.user WHERE User=''; DELETE FROM mysql.user WHERE User='root' AND Host NOT IN ('localhost', '127.0.0.1', '::1'); FLUSH PRIVILEGES;"
+    #{node['mysql']['mysql_bin']} -uroot -h127.0.0.1 -e "UPDATE mysql.user SET Password=PASSWORD('#{node[:mysql][:server_root_password]}') WHERE User='root'; DELETE FROM mysql.user WHERE User=''; DELETE FROM mysql.user WHERE User='root' AND Host NOT IN ('localhost', '127.0.0.1', '::1'); FLUSH PRIVILEGES;"
   EOH
   only_if { my_ip == init_host && (galera_config['secure'] == 'yes') && !FileTest.exists?("#{install_flag}") }
 end
