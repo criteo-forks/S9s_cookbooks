@@ -62,7 +62,7 @@ user "mysql" do
   shell "/bin/false"
 end
 
-galera_config = node[:galera_config]
+galera_config = node[:galera_config] || data_bag_item('s9s_galera', 'config')
 mysql_tarball = galera_config['mysql_wsrep_tarball_' + node['kernel']['machine']]
 # strip .tar.gz
 mysql_package = mysql_tarball[0..-8]
@@ -190,7 +190,7 @@ end
 
 my_ip = node['ipaddress']
 
-if node[:galera_config]["hostnames"] then
+if node[:galera_config]["use_hostnames"] then
   init_host = Resolv.getaddresses(galera_config['init_node']).last
 else
   init_host = galera_config['init_node']  
@@ -199,9 +199,9 @@ end
 sync_host = init_host
 
 hosts = []
-if node[:galera_config]["hostnames"] then
-  galera_config['galera_nodes'].each do |fqdn|
-    hosts << Resolv.getaddresses(fqdn).last
+if node[:galera_config]["use_hostnames"] then
+  hosts = galera_config['galera_nodes'].map do |fqdn|
+    Resolv.getaddresses(fqdn).last
   end
 else
   hosts = galera_config['galera_nodes']
@@ -287,7 +287,7 @@ bash "secure-mysql" do
   user "root"
   code <<-EOH
     #{node['mysql']['mysql_bin']} -uroot -h127.0.0.1 -e "DROP DATABASE IF EXISTS test; DELETE FROM mysql.db WHERE DB='test' OR DB='test\\_%'"
-    #{node['mysql']['mysql_bin']} -uroot -h127.0.0.1 -e "UPDATE mysql.user SET Password=PASSWORD('#{node[:mysql][:server_root_password]}') WHERE User='root'; DELETE FROM mysql.user WHERE User=''; DELETE FROM mysql.user WHERE User='root' AND Host NOT IN ('localhost', '127.0.0.1', '::1'); FLUSH PRIVILEGES;"
+    #{node['mysql']['mysql_bin']} -uroot -h127.0.0.1 -e "UPDATE mysql.user SET Password=PASSWORD('#{node['mysql']['root_password']}') WHERE User='root'; DELETE FROM mysql.user WHERE User=''; DELETE FROM mysql.user WHERE User='root' AND Host NOT IN ('localhost', '127.0.0.1', '::1'); FLUSH PRIVILEGES;"
   EOH
   only_if { my_ip == init_host && (galera_config['secure'] == 'yes') && !FileTest.exists?("#{install_flag}") }
 end
