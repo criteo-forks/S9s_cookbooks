@@ -20,7 +20,10 @@
 package "libaio"
 package "rsync"
 
-if node[:galera_config]["vagrant_host"] then
+#if data_bag doesn't exist, we use attributes
+galera_config = data_bag_item('s9s_galera', 'config') rescue node[:galera_config]
+
+if galera_config["vagrant_host"] then
   # Vagrant host only fix
   Ohai::Config[:plugin_path] << node['vagrant-ohai']['plugin_path']
   Chef::Log.info("vagrant ohai plugins will be at: #{node['vagrant-ohai']['plugin_path']}")
@@ -62,7 +65,6 @@ user "mysql" do
   shell "/bin/false"
 end
 
-galera_config = node[:galera_config] || data_bag_item('s9s_galera', 'config')
 mysql_tarball = galera_config['mysql_wsrep_tarball_' + node['kernel']['machine']]
 # strip .tar.gz
 mysql_package = mysql_tarball[0..-8]
@@ -190,7 +192,7 @@ end
 
 my_ip = node['ipaddress']
 
-if node[:galera_config]["use_hostnames"] then
+if galera_config["use_hostnames"] then
   init_host = Resolv.getaddresses(galera_config['init_node']).last
 else
   init_host = galera_config['init_node']  
@@ -199,7 +201,7 @@ end
 sync_host = init_host
 
 hosts = []
-if node[:galera_config]["use_hostnames"] then
+if galera_config["use_hostnames"] then
   hosts = galera_config['galera_nodes'].map do |fqdn|
     Resolv.getaddresses(fqdn).last
   end
