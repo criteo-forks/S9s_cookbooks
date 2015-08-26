@@ -17,35 +17,43 @@
 # limitations under the License.
 #
 
-# Vagrant host only fix
-Ohai::Config[:plugin_path] << node['vagrant-ohai']['plugin_path']
-Chef::Log.info("vagrant ohai plugins will be at: #{node['vagrant-ohai']['plugin_path']}")
+package "libaio"
+package "rsync"
 
-rd = remote_directory node['vagrant-ohai']['plugin_path'] do
-  source 'plugins'
-  owner 'root'
-  group 'root'
-  mode 0755
-  recursive true
-  action :nothing
-end
+#if data_bag doesn't exist, we use attributes
+galera_config = data_bag_item('s9s_galera', 'config') rescue node[:galera_config]
 
-rd.run_action(:create)
+if galera_config["vagrant_host"] then
+  # Vagrant host only fix
+  Ohai::Config[:plugin_path] << node['vagrant-ohai']['plugin_path']
+  Chef::Log.info("vagrant ohai plugins will be at: #{node['vagrant-ohai']['plugin_path']}")
 
-# only reload ohai if new plugins were dropped off OR
-# node['vagrant-ohai']['plugin_path'] does not exists in client.rb
-if rd.updated? || 
-  !(::IO.read(Chef::Config[:config_file]) =~ /Ohai::Config\[:plugin_path\]\s*<<\s*["']#{node['vagrant-ohai']['plugin_path']}["']/)
-
-  ohai 'custom_plugins' do
+  rd = remote_directory node['vagrant-ohai']['plugin_path'] do
+    source 'plugins'
+    owner 'root'
+    group 'root'
+    mode 0755
+    recursive true
     action :nothing
-  end.run_action(:reload)
+  end
 
+  rd.run_action(:create)
+
+  # only reload ohai if new plugins were dropped off OR
+  # node['vagrant-ohai']['plugin_path'] does not exists in client.rb
+  if rd.updated? ||
+     !(::IO.read(Chef::Config[:config_file]) =~ /Ohai::Config\[:plugin_path\]\s*<<\s*["']#{node['vagrant-ohai']['plugin_path']}["']/)
+
+    ohai 'custom_plugins' do
+      action :nothing
+    end.run_action(:reload)
+
+  end
+
+  # Vagrant host only fix end
 end
 
-# Vagrant host only fix end
-
-install_flag = "/root/.s9s_galera_installed"
+install_flag = ::File.join(Chef::Config[:file_cache_path], ".s9s_galera_installed")
 
 group "mysql" do
 end
@@ -57,7 +65,6 @@ user "mysql" do
   shell "/bin/false"
 end
 
-galera_config = data_bag_item('s9s_galera', 'config')
 mysql_tarball = galera_config['mysql_wsrep_tarball_' + node['kernel']['machine']]
 # strip .tar.gz
 mysql_package = mysql_tarball[0..-8]
@@ -184,11 +191,24 @@ template "my.cnf" do
 end
 
 my_ip = node['ipaddress']
-init_host = galera_config['init_node']
+
+if galera_config["use_hostnames"] then
+  init_host = Resolv.getaddresses(galera_config['init_node']).last
+else
+  init_host = galera_config['init_node']  
+end
+
 sync_host = init_host
 
-hosts = galera_config['galera_nodes']
-Chef::Log.info "init_host = #{init_host}, my_ip = #{my_ip}, hosts = #{hosts}"
+hosts = []
+if galera_config["use_hostnames"] then
+  hosts = galera_config['galera_nodes'].map do |fqdn|
+    Resolv.getaddresses(fqdn).last
+  end
+else
+  hosts = galera_config['galera_nodes']
+end
+
 if File.exists?("#{install_flag}") && hosts != nil && hosts.length > 0
   i = 0
   begin
