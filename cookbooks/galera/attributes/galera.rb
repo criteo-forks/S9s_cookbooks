@@ -18,5 +18,5 @@ default[:galera_config] = {
   "update_wsrep_urls" => "yes",
   "purge_mysql" => "no",
   "vagrant_host" => true,
-  "hostnames" => false,
+  "use_hostnames" => false,
 }
